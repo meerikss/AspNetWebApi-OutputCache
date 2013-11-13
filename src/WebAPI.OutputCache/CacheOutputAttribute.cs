@@ -20,7 +20,7 @@ namespace WebAPI.OutputCache
         public bool ExcludeQueryStringFromCacheKey { get; set; }
         public int ServerTimeSpan { get; set; }
         public int ClientTimeSpan { get; set; }
-		public bool NoCache { get; set; }
+        public bool NoCache { get; set; }
         private MediaTypeHeaderValue _responseMediaType;
 
         internal IModelQuery<DateTime, CacheTime> CacheTimeQuery;
@@ -41,7 +41,7 @@ namespace WebAPI.OutputCache
 
         protected void ResetCacheTimeQuery()
         {
-            CacheTimeQuery = new ShortTime( ServerTimeSpan, ClientTimeSpan );
+            CacheTimeQuery = new ShortTime(ServerTimeSpan, ClientTimeSpan);
         }
 
         protected virtual MediaTypeHeaderValue GetExpectedMediaType(HttpConfiguration config, HttpActionContext actionContext)
@@ -49,8 +49,8 @@ namespace WebAPI.OutputCache
             var responseMediaType = actionContext.Request.Headers.Accept != null
                                         ? actionContext.Request.Headers.Accept.FirstOrDefault()
                                         : new MediaTypeHeaderValue("application/json");
-            
-            var negotiator = config.Services.GetService(typeof (IContentNegotiator)) as IContentNegotiator;
+
+            var negotiator = config.Services.GetService(typeof(IContentNegotiator)) as IContentNegotiator;
 
             if (negotiator != null)
             {
@@ -82,7 +82,7 @@ namespace WebAPI.OutputCache
                 var etag = WebApiCache.Get(cachekey + Constants.EtagKey) as EntityTagHeaderValue;
                 if (etag != null)
                 {
-                    if (actionContext.Request.Headers.IfNoneMatch.Any(x => x.Tag ==  etag.Tag))
+                    if (actionContext.Request.Headers.IfNoneMatch.Any(x => x.Tag == etag.Tag))
                     {
                         var time = CacheTimeQuery.Execute(DateTime.Now);
                         var quickResponse = actionContext.Request.CreateResponse(HttpStatusCode.NotModified);
@@ -110,6 +110,11 @@ namespace WebAPI.OutputCache
             ApplyCacheHeaders(actionContext.Response, cacheTime);
         }
 
+        protected virtual string CreateEtag(HttpActionExecutedContext actionExecutedContext, string cachekey, CacheTime cacheTime)
+        {
+            return Guid.NewGuid().ToString();
+        }
+
         public override void OnActionExecuted(HttpActionExecutedContext actionExecutedContext)
         {
             if (actionExecutedContext.ActionContext.Response == null || !actionExecutedContext.ActionContext.Response.IsSuccessStatusCode) return;
@@ -123,25 +128,35 @@ namespace WebAPI.OutputCache
 
                 if (!string.IsNullOrWhiteSpace(cachekey) && !(WebApiCache.Contains(cachekey)))
                 {
-                    SetEtag(actionExecutedContext.Response, Guid.NewGuid().ToString());
+                    var eTag = CreateEtag(actionExecutedContext, cachekey, cacheTime);
+                    SetEtag(actionExecutedContext.Response, eTag);
 
                     if (actionExecutedContext.Response.Content != null)
                     {
                         actionExecutedContext.Response.Content.ReadAsByteArrayAsync().ContinueWith(t =>
-                            {
-                                var baseKey = actionExecutedContext.Request.GetConfiguration().CacheOutputConfiguration().MakeBaseCachekey(actionExecutedContext.ActionContext.ControllerContext.ControllerDescriptor.ControllerName, actionExecutedContext.ActionContext.ActionDescriptor.ActionName);
-                                
-                                WebApiCache.Add(baseKey, string.Empty, cacheTime.AbsoluteExpiration);
-                                WebApiCache.Add(cachekey, t.Result, cacheTime.AbsoluteExpiration, baseKey);
+                        {
+                            var baseKey = actionExecutedContext.Request.GetConfiguration().CacheOutputConfiguration().MakeBaseCachekey(actionExecutedContext.ActionContext.ControllerContext.ControllerDescriptor.ControllerName, actionExecutedContext.ActionContext.ActionDescriptor.ActionName);
 
-                                WebApiCache.Add(cachekey + Constants.ContentTypeKey,
-                                                actionExecutedContext.Response.Content.Headers.ContentType,
-                                                cacheTime.AbsoluteExpiration, baseKey);
+                            WebApiCache.Add(baseKey, string.Empty, cacheTime.AbsoluteExpiration);
+                            WebApiCache.Add(cachekey, t.Result, cacheTime.AbsoluteExpiration, baseKey);
 
-                                WebApiCache.Add(cachekey + Constants.EtagKey,
-                                                actionExecutedContext.Response.Headers.ETag,
-                                                cacheTime.AbsoluteExpiration, baseKey);
-                            });
+                            WebApiCache.Add(cachekey + Constants.ContentTypeKey,
+                                            actionExecutedContext.Response.Content.Headers.ContentType,
+                                            cacheTime.AbsoluteExpiration, baseKey);
+
+                            WebApiCache.Add(cachekey + Constants.EtagKey,
+                                            actionExecutedContext.Response.Headers.ETag,
+                                            cacheTime.AbsoluteExpiration, baseKey);
+                        });
+                    }
+                    var quotedEtag = "\"" + eTag + "\"";
+                    if (actionExecutedContext.ActionContext.Request.Headers.IfNoneMatch.Any(x => x.Tag == quotedEtag))
+                    {
+                        var time = CacheTimeQuery.Execute(DateTime.Now);
+                        var quickResponse = actionExecutedContext.ActionContext.Request.CreateResponse(HttpStatusCode.NotModified);
+                        ApplyCacheHeaders(quickResponse, time);
+                        actionExecutedContext.ActionContext.Response = quickResponse;
+                        return;
                     }
                 }
             }
@@ -154,18 +169,18 @@ namespace WebAPI.OutputCache
             if (cacheTime.ClientTimeSpan > TimeSpan.Zero || MustRevalidate)
             {
                 var cachecontrol = new CacheControlHeaderValue
-                                       {
-                                           MaxAge = cacheTime.ClientTimeSpan,
-                                           MustRevalidate = MustRevalidate
-                                       };
+                {
+                    MaxAge = cacheTime.ClientTimeSpan,
+                    MustRevalidate = MustRevalidate
+                };
 
                 response.Headers.CacheControl = cachecontrol;
-			}
-			else if (NoCache)
-			{
-				response.Headers.CacheControl = new CacheControlHeaderValue {NoCache = true};
-				response.Headers.Add("Pragma", "no-cache");
-			}
+            }
+            else if (NoCache)
+            {
+                response.Headers.CacheControl = new CacheControlHeaderValue { NoCache = true };
+                response.Headers.Add("Pragma", "no-cache");
+            }
         }
 
         private static void SetEtag(HttpResponseMessage message, string etag)
@@ -174,4 +189,4 @@ namespace WebAPI.OutputCache
             message.Headers.ETag = eTag;
         }
     }
-} 
+}
