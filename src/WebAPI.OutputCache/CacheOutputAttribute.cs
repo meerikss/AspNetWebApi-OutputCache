@@ -97,7 +97,7 @@ namespace WebAPI.OutputCache
             if (val == null) return;
 
             var contenttype = (MediaTypeHeaderValue)WebApiCache.Get(cachekey + Constants.ContentTypeKey) ??
-                              new MediaTypeHeaderValue(cachekey.Split(':')[1]);
+                              _responseMediaType;
 
             actionContext.Response = actionContext.Request.CreateResponse();
             actionContext.Response.Content = new ByteArrayContent(val);
@@ -133,7 +133,8 @@ namespace WebAPI.OutputCache
 
                     if (actionExecutedContext.Response.Content != null)
                     {
-                        actionExecutedContext.Response.Content.ReadAsByteArrayAsync().ContinueWith(t =>
+                        var realResponse = actionExecutedContext.Response;
+                        realResponse.Content.ReadAsByteArrayAsync().ContinueWith(t =>
                         {
                             var baseKey = actionExecutedContext.Request.GetConfiguration().CacheOutputConfiguration().MakeBaseCachekey(actionExecutedContext.ActionContext.ControllerContext.ControllerDescriptor.ControllerName, actionExecutedContext.ActionContext.ActionDescriptor.ActionName);
 
@@ -141,11 +142,11 @@ namespace WebAPI.OutputCache
                             WebApiCache.Add(cachekey, t.Result, cacheTime.AbsoluteExpiration, baseKey);
 
                             WebApiCache.Add(cachekey + Constants.ContentTypeKey,
-                                            actionExecutedContext.Response.Content.Headers.ContentType,
+                                            realResponse.Content.Headers.ContentType,
                                             cacheTime.AbsoluteExpiration, baseKey);
 
                             WebApiCache.Add(cachekey + Constants.EtagKey,
-                                            actionExecutedContext.Response.Headers.ETag,
+                                            realResponse.Headers.ETag,
                                             cacheTime.AbsoluteExpiration, baseKey);
                         });
                     }
